@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flappy Bird</title>
+  <style>
+body {
+  margin: 0;
+  background: #222;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;  /* allow content to extend */
+  overflow-y: auto;   /* enable scrolling */
+  color: white;
+  font-family: Arial, sans-serif;
+}
+    canvas {
+      border: 5px solid black;
+      background: #70c5ce;
+      display: block;
+    }
+    #startBtn, #nameInput {
+      margin: 10px;
+      padding: 10px 20px;
+      font-size: 20px;
+    }
+    #countdown {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 60px;
+      color: white;
+    }
+    #scoreboard {
+      margin-top: 10px;
+      width: 500px;
+      background: #333;
+      padding: 10px;
+      border-radius: 10px;
+      text-align: center;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    #scoreboard h2 {
+      margin: 5px;
+      font-size: 24px;
+    }
+    #scoreList {
+      list-style: none;
+      padding: 0;
+    }
+    #scoreList li {
+      padding: 5px;
+      font-size: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .deleteBtn {
+      background: red;
+      border: none;
+      color: white;
+      padding: 5px 10px;
+      cursor: pointer;
+      border-radius: 5px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <input type="text" id="nameInput" placeholder="Enter your name">
+  <button id="startBtn">Start Game</button>
+  <div id="countdown"></div>
+  <canvas id="gameCanvas" width="700" height="700"></canvas>
+
+  <div id="scoreboard">
+    <h2>Scoreboard</h2>
+    <ul id="scoreList"></ul>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const startBtn = document.getElementById("startBtn");
+    const countdownEl = document.getElementById("countdown");
+    const nameInput = document.getElementById("nameInput");
+    const scoreList = document.getElementById("scoreList");
+
+    // Load images
+    const birdImg = new Image();
+    birdImg.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/yellowbird-midflap.png";
+    const bgImg = new Image();
+    bgImg.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/background-day.png";
+    const pipeImg = new Image();
+    pipeImg.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/pipe-green.png";
+
+    // Game variables
+    let bird, pipes, score, gameRunning, micStream, soundEnabled = false;
+    const pipeGap = 250;
+    let frame = 0;
+    let playerName = "";
+
+    // Load scoreboard
+    let scores = JSON.parse(localStorage.getItem("flappyScores")) || [];
+
+    function saveScore(name, score) {
+      scores.push({ name, score });
+      scores.sort((a, b) => b.score - a.score); // highest first
+      localStorage.setItem("flappyScores", JSON.stringify(scores));
+      renderScoreboard();
+    }
+
+    function deleteScore(index) {
+      scores.splice(index, 1);
+      localStorage.setItem("flappyScores", JSON.stringify(scores));
+      renderScoreboard();
+    }
+
+    function renderScoreboard() {
+      scoreList.innerHTML = "";
+      scores.forEach((entry, index) => {
+        const li = document.createElement("li");
+        li.innerHTML = `
+          ${index + 1}. ${entry.name} - ${entry.score}
+          <button class="deleteBtn" onclick="deleteScore(${index})">🗑️ Delete</button>
+        `;
+        scoreList.appendChild(li);
+      });
+    }
+
+    function resetGame() {
+      bird = { x: 100, y: 300, width: 50, height: 40, gravity: 0.5, lift: -8, velocity: 0 };
+      pipes = [];
+      score = 0;
+      frame = 0;
+    }
+
+    function createPipe() {
+      const topHeight = Math.random() * (canvas.height - pipeGap - 200) + 50;
+      pipes.push({
+        x: canvas.width,
+        width: 60,
+        top: topHeight,
+        bottom: canvas.height - topHeight - pipeGap,
+        passed: false
+      });
+    }
+
+    function draw() {
+      ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
+      pipes.forEach(pipe => {
+        ctx.save();
+        ctx.translate(pipe.x + pipe.width / 2, pipe.top);
+        ctx.scale(1, -1);
+        ctx.drawImage(pipeImg, -pipe.width / 2, 0, pipe.width, pipe.top);
+        ctx.restore();
+        ctx.drawImage(pipeImg, pipe.x, pipe.top + pipeGap, pipe.width, pipe.bottom);
+      });
+      ctx.drawImage(birdImg, bird.x, bird.y, bird.width, bird.height);
+      ctx.fillStyle = "white";
+      ctx.font = "30px Arial";
+      ctx.fillText("Score: " + score, 10, 50);
+    }
+
+    function update() {
+      bird.velocity += bird.gravity;
+      bird.y += bird.velocity;
+
+      if (frame % 150 === 0) createPipe();
+      frame++;
+
+      pipes.forEach(pipe => {
+        pipe.x -= 2;
+        if (!pipe.passed && pipe.x + pipe.width < bird.x) {
+          score++;
+          pipe.passed = true;
+        }
+      });
+
+      for (let pipe of pipes) {
+        if (
+          bird.x < pipe.x + pipe.width &&
+          bird.x + bird.width > pipe.x &&
+          (bird.y < pipe.top || bird.y + bird.height > pipe.top + pipeGap)
+        ) {
+          gameOver();
+        }
+      }
+
+      if (bird.y + bird.height > canvas.height || bird.y < 0) gameOver();
+    }
+
+    function gameOver() {
+      gameRunning = false;
+      saveScore(playerName, score);
+      startBtn.style.display = "block";
+      nameInput.style.display = "block";
+      startBtn.textContent = "Restart Game";
+    }
+
+    function gameLoop() {
+      if (!gameRunning) return;
+      update();
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Sound detection
+    async function startMic() {
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(micStream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+
+        const data = new Uint8Array(analyser.fftSize);
+        soundEnabled = true;
+
+        function listen() {
+          analyser.getByteTimeDomainData(data);
+          let sum = 0;
+          for (let i = 0; i < data.length; i++) sum += Math.abs(data[i] - 128);
+          const volume = sum / data.length;
+
+          if (volume > 8 && gameRunning) bird.velocity = bird.lift;
+          requestAnimationFrame(listen);
+        }
+        listen();
+      } catch {
+        alert("Microphone unavailable! Tap to fly instead.");
+        soundEnabled = false;
+      }
+    }
+
+    function startCountdown() {
+      let count = 5;
+      countdownEl.textContent = count;
+      const countdownInterval = setInterval(() => {
+        count--;
+        countdownEl.textContent = count > 0 ? count : "";
+        if (count <= 0) {
+          clearInterval(countdownInterval);
+          startGame();
+        }
+      }, 1000);
+    }
+
+    function startGame() {
+      resetGame();
+      gameRunning = true;
+      startBtn.style.display = "none";
+      nameInput.style.display = "none";
+      countdownEl.textContent = "";
+      gameLoop();
+    }
+
+    // Tap control
+    canvas.addEventListener("click", () => {
+      if (!gameRunning) return;
+      bird.velocity = bird.lift;
+    });
+
+    startBtn.addEventListener("click", () => {
+      if (!nameInput.value.trim()) {
+        alert("Please enter your name!");
+        return;
+      }
+      playerName = nameInput.value.trim();
+      startCountdown();
+      if (!micStream && !soundEnabled) startMic();
+    });
+
+    resetGame();
+    draw();
+    renderScoreboard();
+
+    // Expose delete function globally
+    window.deleteScore = deleteScore;
+  </script>
+</body>
+</html>
