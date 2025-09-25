@@ -5,17 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Flappy Bird</title>
   <style>
-body {
-  margin: 0;
-  background: #222;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-height: 100vh;  /* allow content to extend */
-  overflow-y: auto;   /* enable scrolling */
-  color: white;
-  font-family: Arial, sans-serif;
-}
+    body {
+      margin: 0;
+      background: #222;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      overflow-y: auto;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
     canvas {
       border: 5px solid black;
       background: #70c5ce;
@@ -81,13 +81,37 @@ body {
     <ul id="scoreList"></ul>
   </div>
 
-  <script>
+  <!-- Firebase + Game Script -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, getDocs, query, orderBy, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
+
+    // Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyAR74sIu_QZFbIf0kkQAqBJ9jUnTmzpCxI",
+      authDomain: "flappy-bird-database-f5099.firebaseapp.com",
+      projectId: "flappy-bird-database-f5099",
+      storageBucket: "flappy-bird-database-f5099.firebasestorage.app",
+      messagingSenderId: "645008588805",
+      appId: "1:645008588805:web:15c10efe6eeefc0ea89c6c"
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // Game variables
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     const startBtn = document.getElementById("startBtn");
     const countdownEl = document.getElementById("countdown");
     const nameInput = document.getElementById("nameInput");
     const scoreList = document.getElementById("scoreList");
+
+    let bird, pipes, score, gameRunning, micStream, soundEnabled = false;
+    const pipeGap = 250;
+    let frame = 0;
+    let playerName = "";
 
     // Load images
     const birdImg = new Image();
@@ -97,40 +121,42 @@ body {
     const pipeImg = new Image();
     pipeImg.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/pipe-green.png";
 
-    // Game variables
-    let bird, pipes, score, gameRunning, micStream, soundEnabled = false;
-    const pipeGap = 250;
-    let frame = 0;
-    let playerName = "";
-
-    // Load scoreboard
-    let scores = JSON.parse(localStorage.getItem("flappyScores")) || [];
-
-    function saveScore(name, score) {
-      scores.push({ name, score });
-      scores.sort((a, b) => b.score - a.score); // highest first
-      localStorage.setItem("flappyScores", JSON.stringify(scores));
-      renderScoreboard();
-    }
-
-    function deleteScore(index) {
-      scores.splice(index, 1);
-      localStorage.setItem("flappyScores", JSON.stringify(scores));
-      renderScoreboard();
-    }
-
-    function renderScoreboard() {
+    // Firestore functions
+    async function renderScoreboard() {
       scoreList.innerHTML = "";
-      scores.forEach((entry, index) => {
+      const q = query(collection(db, "scores"), orderBy("score", "desc"));
+      const querySnapshot = await getDocs(q);
+
+      querySnapshot.forEach((docSnap, index) => {
+        const data = docSnap.data();
         const li = document.createElement("li");
         li.innerHTML = `
-          ${index + 1}. ${entry.name} - ${entry.score}
-          <button class="deleteBtn" onclick="deleteScore(${index})">🗑️ Delete</button>
+          ${index + 1}. ${data.name} - ${data.score}
+          <button class="deleteBtn" onclick="deleteScore('${docSnap.id}')">🗑️ Delete</button>
         `;
         scoreList.appendChild(li);
       });
     }
 
+    async function saveScore(name, score) {
+      try {
+        await addDoc(collection(db, "scores"), { name, score });
+        renderScoreboard();
+      } catch (e) {
+        console.error("Error adding score: ", e);
+      }
+    }
+
+    window.deleteScore = async function(id) {
+      try {
+        await deleteDoc(doc(db, "scores", id));
+        renderScoreboard();
+      } catch (e) {
+        console.error("Error deleting score: ", e);
+      }
+    };
+
+    // Game functions
     function resetGame() {
       bird = { x: 100, y: 300, width: 50, height: 40, gravity: 0.5, lift: -8, velocity: 0 };
       pipes = [];
@@ -208,7 +234,6 @@ body {
       requestAnimationFrame(gameLoop);
     }
 
-    // Sound detection
     async function startMic() {
       try {
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -259,7 +284,6 @@ body {
       gameLoop();
     }
 
-    // Tap control
     canvas.addEventListener("click", () => {
       if (!gameRunning) return;
       bird.velocity = bird.lift;
@@ -278,11 +302,6 @@ body {
     resetGame();
     draw();
     renderScoreboard();
-
-    // Expose delete function globally
-    window.deleteScore = deleteScore;
   </script>
 </body>
 </html>
-
-
