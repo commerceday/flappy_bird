@@ -36,7 +36,8 @@
     }
     #scoreboard {
       margin-top: 10px;
-      width: 500px;
+      width: 90%;
+      max-width: 500px;
       background: #333;
       padding: 10px;
       border-radius: 10px;
@@ -74,17 +75,16 @@
   <input type="text" id="nameInput" placeholder="Enter your name">
   <button id="startBtn">Start Game</button>
   <div id="countdown"></div>
-  <canvas id="gameCanvas" width="500" height="700"></canvas>
+  <canvas id="gameCanvas"></canvas>
 
   <div id="scoreboard">
-    <h2>Scoreboard</h2>
+    <h2>Top Scores</h2>
     <ul id="scoreList"></ul>
   </div>
 
-  <!-- Firebase + Game Script -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, getDocs, query, orderBy, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
+    import { getFirestore, collection, doc, setDoc, query, orderBy, limit, onSnapshot, deleteDoc } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
 
     // Firebase config
     const firebaseConfig = {
@@ -96,11 +96,9 @@
       appId: "1:645008588805:web:15c10efe6eeefc0ea89c6c"
     };
 
-    // Initialize Firebase
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // Game variables
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     const startBtn = document.getElementById("startBtn");
@@ -108,12 +106,15 @@
     const nameInput = document.getElementById("nameInput");
     const scoreList = document.getElementById("scoreList");
 
-    let bird, pipes, score, gameRunning, micStream, soundEnabled = false;
-    const pipeGap = 250;
-    let frame = 0;
-    let playerName = "";
+    // Responsive canvas
+    function resizeCanvas() {
+      canvas.width = Math.min(window.innerWidth * 0.9, 500);
+      canvas.height = canvas.width * 1.4; // keep aspect ratio
+      draw();
+    }
+    window.addEventListener('resize', resizeCanvas);
 
-    // Load images
+    // Images
     const birdImg = new Image();
     birdImg.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/yellowbird-midflap.png";
     const bgImg = new Image();
@@ -121,42 +122,11 @@
     const pipeImg = new Image();
     pipeImg.src = "https://raw.githubusercontent.com/samuelcust/flappy-bird-assets/master/sprites/pipe-green.png";
 
-    // Firestore functions
-    async function renderScoreboard() {
-      scoreList.innerHTML = "";
-      const q = query(collection(db, "scores"), orderBy("score", "desc"));
-      const querySnapshot = await getDocs(q);
+    let bird, pipes, score, gameRunning, micStream, soundEnabled=false;
+    const pipeGap = 250;
+    let frame = 0;
+    let playerName="";
 
-      querySnapshot.forEach((docSnap, index) => {
-        const data = docSnap.data();
-        const li = document.createElement("li");
-        li.innerHTML = `
-          ${index + 1}. ${data.name} - ${data.score}
-          <button class="deleteBtn" onclick="deleteScore('${docSnap.id}')">🗑️ Delete</button>
-        `;
-        scoreList.appendChild(li);
-      });
-    }
-
-    async function saveScore(name, score) {
-      try {
-        await addDoc(collection(db, "scores"), { name, score });
-        renderScoreboard();
-      } catch (e) {
-        console.error("Error adding score: ", e);
-      }
-    }
-
-    window.deleteScore = async function(id) {
-      try {
-        await deleteDoc(doc(db, "scores", id));
-        renderScoreboard();
-      } catch (e) {
-        console.error("Error deleting score: ", e);
-      }
-    };
-
-    // Game functions
     function resetGame() {
       bird = { x: 100, y: 300, width: 50, height: 40, gravity: 0.5, lift: -8, velocity: 0 };
       pipes = [];
@@ -166,142 +136,158 @@
 
     function createPipe() {
       const topHeight = Math.random() * (canvas.height - pipeGap - 200) + 50;
-      pipes.push({
-        x: canvas.width,
-        width: 60,
-        top: topHeight,
-        bottom: canvas.height - topHeight - pipeGap,
-        passed: false
-      });
+      pipes.push({ x: canvas.width, width: 60, top: topHeight, bottom: canvas.height - topHeight - pipeGap, passed: false });
     }
 
     function draw() {
-      ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
-      pipes.forEach(pipe => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(bgImg,0,0,canvas.width,canvas.height);
+      pipes.forEach(pipe=>{
         ctx.save();
-        ctx.translate(pipe.x + pipe.width / 2, pipe.top);
-        ctx.scale(1, -1);
-        ctx.drawImage(pipeImg, -pipe.width / 2, 0, pipe.width, pipe.top);
+        ctx.translate(pipe.x+pipe.width/2, pipe.top);
+        ctx.scale(1,-1);
+        ctx.drawImage(pipeImg,-pipe.width/2,0,pipe.width,pipe.top);
         ctx.restore();
-        ctx.drawImage(pipeImg, pipe.x, pipe.top + pipeGap, pipe.width, pipe.bottom);
+        ctx.drawImage(pipeImg,pipe.x,pipe.top+pipeGap,pipe.width,pipe.bottom);
       });
-      ctx.drawImage(birdImg, bird.x, bird.y, bird.width, bird.height);
-      ctx.fillStyle = "white";
-      ctx.font = "30px Arial";
-      ctx.fillText("Score: " + score, 10, 50);
+      ctx.drawImage(birdImg,bird.x,bird.y,bird.width,bird.height);
+      ctx.fillStyle="white";
+      ctx.font="30px Arial";
+      ctx.fillText("Score: "+score,10,50);
     }
 
     function update() {
-      bird.velocity += bird.gravity;
-      bird.y += bird.velocity;
+      bird.velocity+=bird.gravity;
+      bird.y+=bird.velocity;
 
-      if (frame % 150 === 0) createPipe();
+      if(frame%150===0) createPipe();
       frame++;
 
-      pipes.forEach(pipe => {
-        pipe.x -= 2;
-        if (!pipe.passed && pipe.x + pipe.width < bird.x) {
+      pipes.forEach(pipe=>{
+        pipe.x-=2;
+        if(!pipe.passed && pipe.x+pipe.width<bird.x){
           score++;
-          pipe.passed = true;
+          pipe.passed=true;
         }
       });
 
-      for (let pipe of pipes) {
-        if (
-          bird.x < pipe.x + pipe.width &&
-          bird.x + bird.width > pipe.x &&
-          (bird.y < pipe.top || bird.y + bird.height > pipe.top + pipeGap)
-        ) {
+      for(let pipe of pipes){
+        if(bird.x<pipe.x+pipe.width && bird.x+bird.width>pipe.x &&
+           (bird.y<pipe.top || bird.y+bird.height>pipe.top+pipeGap)){
           gameOver();
         }
       }
-
-      if (bird.y + bird.height > canvas.height || bird.y < 0) gameOver();
+      if(bird.y+bird.height>canvas.height || bird.y<0) gameOver();
     }
 
     function gameOver() {
-      gameRunning = false;
+      gameRunning=false;
       saveScore(playerName, score);
-      startBtn.style.display = "block";
-      nameInput.style.display = "block";
-      startBtn.textContent = "Restart Game";
+      startBtn.style.display="block";
+      nameInput.style.display="block";
+      startBtn.textContent="Restart Game";
     }
 
-    function gameLoop() {
-      if (!gameRunning) return;
+    function gameLoop(){
+      if(!gameRunning) return;
       update();
       draw();
       requestAnimationFrame(gameLoop);
     }
 
-    async function startMic() {
-      try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    async function startMic(){
+      try{
+        micStream = await navigator.mediaDevices.getUserMedia({audio:true});
+        const audioContext = new (window.AudioContext||window.webkitAudioContext)();
         const source = audioContext.createMediaStreamSource(micStream);
         const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 1024;
+        analyser.fftSize=1024;
         source.connect(analyser);
-
-        const data = new Uint8Array(analyser.fftSize);
-        soundEnabled = true;
-
-        function listen() {
+        const data=new Uint8Array(analyser.fftSize);
+        soundEnabled=true;
+        function listen(){
           analyser.getByteTimeDomainData(data);
-          let sum = 0;
-          for (let i = 0; i < data.length; i++) sum += Math.abs(data[i] - 128);
-          const volume = sum / data.length;
-
-          if (volume > 8 && gameRunning) bird.velocity = bird.lift;
+          let sum=0;
+          for(let i=0;i<data.length;i++) sum+=Math.abs(data[i]-128);
+          const volume=sum/data.length;
+          if(volume>8 && gameRunning) bird.velocity=bird.lift;
           requestAnimationFrame(listen);
         }
         listen();
-      } catch {
+      } catch{
         alert("Microphone unavailable! Tap to fly instead.");
-        soundEnabled = false;
+        soundEnabled=false;
       }
     }
 
-    function startCountdown() {
-      let count = 5;
-      countdownEl.textContent = count;
-      const countdownInterval = setInterval(() => {
+    function startCountdown(){
+      let count=5;
+      countdownEl.textContent=count;
+      const countdownInterval=setInterval(()=>{
         count--;
-        countdownEl.textContent = count > 0 ? count : "";
-        if (count <= 0) {
+        countdownEl.textContent = count>0?count:"";
+        if(count<=0){
           clearInterval(countdownInterval);
           startGame();
         }
-      }, 1000);
+      },1000);
     }
 
-    function startGame() {
+    function startGame(){
       resetGame();
-      gameRunning = true;
-      startBtn.style.display = "none";
-      nameInput.style.display = "none";
-      countdownEl.textContent = "";
+      gameRunning=true;
+      startBtn.style.display="none";
+      nameInput.style.display="none";
+      countdownEl.textContent="";
       gameLoop();
     }
 
-    canvas.addEventListener("click", () => {
-      if (!gameRunning) return;
-      bird.velocity = bird.lift;
+    canvas.addEventListener("click", ()=>{
+      if(!gameRunning) return;
+      bird.velocity=bird.lift;
     });
 
-    startBtn.addEventListener("click", () => {
-      if (!nameInput.value.trim()) {
+    startBtn.addEventListener("click", ()=>{
+      if(!nameInput.value.trim()){
         alert("Please enter your name!");
         return;
       }
-      playerName = nameInput.value.trim();
+      playerName=nameInput.value.trim();
       startCountdown();
-      if (!micStream && !soundEnabled) startMic();
+      if(!micStream && !soundEnabled) startMic();
     });
 
+    // Firestore integration
+    async function saveScore(name, score){
+      try{
+        await setDoc(doc(db,"scores",name),{name,score});
+      }catch(e){console.error("Error saving score:",e);}
+    }
+
+    function renderScoreboard(scores){
+      scoreList.innerHTML="";
+      scores.forEach((entry,index)=>{
+        const li=document.createElement("li");
+        li.textContent=`${index+1}. ${entry.name} - ${entry.score}`;
+        scoreList.appendChild(li);
+      });
+    }
+
+    // Live scoreboard
+    function listenToScoreboard(){
+      const q = query(collection(db,"scores"), orderBy("score","desc"), limit(10));
+      onSnapshot(q,(snapshot)=>{
+        const scores=[];
+        snapshot.forEach(docSnap=>scores.push(docSnap.data()));
+        renderScoreboard(scores);
+      });
+    }
+
+    // Initialize
     resetGame();
-    draw();
-    renderScoreboard();
+    resizeCanvas();
+    listenToScoreboard();
+
   </script>
 </body>
 </html>
